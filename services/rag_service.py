@@ -14,11 +14,10 @@ supabase: Client = create_client(
 voyage = voyageai.Client(api_key=os.getenv("VOYAGE_API_KEY"))
 
 
+# ── Embeddings ────────────────────────────────────────────────────────────────
+
 def get_embedding(text: str) -> list[float]:
-    """
-    Convert text to a vector embedding using Voyage AI.
-    voyage-2 produces 1536-dimensional vectors.
-    """
+    """Convert query text to vector embedding using Voyage AI."""
     result = voyage.embed(
         texts=[text],
         model="voyage-2",
@@ -28,9 +27,7 @@ def get_embedding(text: str) -> list[float]:
 
 
 def get_document_embedding(text: str) -> list[float]:
-    """
-    Embedding for documents being stored (different input_type).
-    """
+    """Convert document text to vector embedding."""
     result = voyage.embed(
         texts=[text],
         model="voyage-2",
@@ -39,21 +36,24 @@ def get_document_embedding(text: str) -> list[float]:
     return result.embeddings[0]
 
 
+# ── Semantic Search ───────────────────────────────────────────────────────────
+
 def search_chunks_semantic(
-    query:   str,
-    stream:  str,
-    subject: str = "",
-    limit:   int = 5
+    query:    str,
+    stream:   str,
+    subject:  str = "",
+    syllabus: str = "",
+    year:     int = None,
+    limit:    int = 8
 ) -> list[dict]:
     """
-    Semantic vector search — finds conceptually similar content
-    even if exact words don't match.
+    Semantic vector search with metadata filtering.
+    Finds conceptually similar content even if exact words don't match.
+    Returns more results (8) so re-ranking can pick the best.
     """
     try:
-        # Convert query to embedding
         query_embedding = get_embedding(query)
 
-        # Search using pgvector cosine similarity
         result = supabase.rpc(
             'match_paper_chunks',
             {
@@ -64,29 +64,53 @@ def search_chunks_semantic(
             }
         ).execute()
 
-        return result.data if result.data else []
+        chunks = result.data if result.data else []
+
+        # Additional metadata filtering after retrieval
+        if syllabus:
+            chunks = [
+                c for c in chunks
+                if c.get("past_papers", {}) and
+                c["past_papers"].get("syllabus", "").lower() == syllabus.lower()
+            ]
+
+        if year:
+            chunks = [
+                c for c in chunks
+                if c.get("past_papers", {}) and
+                c["past_papers"].get("year") == year
+            ]
+
+        return chunks
 
     except Exception as e:
         print(f"Semantic search error: {e}")
-        # Fall back to keyword search if embeddings fail
         return search_chunks_keyword(query, stream, subject, limit)
 
+
+# ── Keyword Search ────────────────────────────────────────────────────────────
 
 def search_chunks_keyword(
     query:   str,
     stream:  str,
     subject: str = "",
-    limit:   int = 5
+    limit:   int = 8
 ) -> list[dict]:
     """
     Keyword fallback search using ilike.
-    Used when embeddings aren't available yet for a paper.
+    Used when embeddings aren't available or semantic search fails.
     """
     try:
-        db_query = supabase\
-            .table("paper_chunks")\
-            .select("*, past_papers(title, subject, year, stream, syllabus, file_url)")\
-            .ilike("content", f"%{query}%")
+        keywords = query.split()[:5]  # Use first 5 words
+        db_query = supabase \
+            .table("paper_chunks") \
+            .select("*, past_papers(title, subject, year, stream, syllabus, file_url)")
+
+        # Search for any of the keywords
+        for keyword in keywords:
+            if len(keyword) > 3:  # Skip short words
+                db_query = db_query.ilike("content", f"%{keyword}%")
+                break  # Use first meaningful keyword
 
         result = db_query.limit(limit).execute()
         return result.data if result.data else []
@@ -96,54 +120,169 @@ def search_chunks_keyword(
         return []
 
 
-def build_context(chunks: list[dict], max_chars: int = 3000) -> str:
+# ── Hybrid Search ─────────────────────────────────────────────────────────────
+
+def search_chunks_hybrid(
+    query:    str,
+    stream:   str,
+    subject:  str = "",
+    syllabus: str = "",
+    limit:    int = 5
+) -> list[dict]:
     """
-    Build a RAG context string from retrieved chunks.
+    Hybrid search — combines semantic + keyword search results.
+    Deduplicates and re-ranks for best results.
+    This gives much better results than either method alone.
+    """
+    # Get results from both methods
+    semantic_results = search_chunks_semantic(
+        query, stream, subject, syllabus, limit=8
+    )
+    keyword_results = search_chunks_keyword(
+        query, stream, subject, limit=5
+    )
+
+    # Combine and deduplicate by chunk id
+    seen_ids = set()
+    combined = []
+
+    # Semantic results get priority
+    for chunk in semantic_results:
+        chunk_id = chunk.get("id")
+        if chunk_id not in seen_ids:
+            seen_ids.add(chunk_id)
+            chunk["_source"] = "semantic"
+            combined.append(chunk)
+
+    # Add keyword results not already in semantic
+    for chunk in keyword_results:
+        chunk_id = chunk.get("id")
+        if chunk_id not in seen_ids:
+            seen_ids.add(chunk_id)
+            chunk["_source"] = "keyword"
+            combined.append(chunk)
+
+    # Re-rank combined results
+    reranked = rerank_chunks(query, combined)
+
+    return reranked[:limit]
+
+
+# ── Re-ranking ────────────────────────────────────────────────────────────────
+
+def rerank_chunks(query: str, chunks: list[dict]) -> list[dict]:
+    """
+    Re-rank chunks by relevance to query.
+    Uses a simple scoring system:
+    - Similarity score from pgvector (if available)
+    - Keyword overlap with query
+    - Recency (newer papers score higher)
+    - Source bonus (semantic > keyword)
+    """
+    if not chunks:
+        return []
+
+    query_words = set(query.lower().split())
+
+    scored = []
+    for chunk in chunks:
+        score = 0.0
+
+        # 1. Similarity score from vector search (0-1)
+        similarity = chunk.get("similarity", 0)
+        score += similarity * 0.5
+
+        # 2. Keyword overlap score
+        content = chunk.get("content", "").lower()
+        content_words = set(content.split())
+        overlap = len(query_words & content_words)
+        keyword_score = min(overlap / max(len(query_words), 1), 1.0)
+        score += keyword_score * 0.3
+
+        # 3. Source bonus
+        if chunk.get("_source") == "semantic":
+            score += 0.1
+
+        # 4. Recency bonus (newer papers are slightly preferred)
+        paper = chunk.get("past_papers", {}) or {}
+        year = paper.get("year", 2015)
+        recency = min((year - 2010) / 15, 1.0)  # Normalize 2010-2025
+        score += recency * 0.1
+
+        chunk["_score"] = score
+        scored.append(chunk)
+
+    # Sort by score descending
+    scored.sort(key=lambda x: x.get("_score", 0), reverse=True)
+
+    return scored
+
+
+# ── Context Builder ───────────────────────────────────────────────────────────
+
+def build_context(chunks: list[dict], max_chars: int = 4000) -> str:
+    """
+    Build a rich RAG context string from retrieved chunks.
+    Includes source information for citation.
+    Improved: avoids duplicate content, better formatting.
     """
     if not chunks:
         return ""
 
-    context = ""
-    total   = 0
+    context = "RELEVANT PAST PAPER CONTENT:\n\n"
+    total = len(context)
+    seen_content = set()
 
     for i, chunk in enumerate(chunks):
         paper = chunk.get("past_papers", {}) or {}
-        source = (
-            f"{paper.get('subject', 'Unknown')} "
-            f"{paper.get('year', '')} "
-            f"({paper.get('syllabus', '')})"
-        ).strip()
+        subject  = paper.get("subject", "Unknown Subject")
+        year     = paper.get("year", "")
+        syllabus = paper.get("syllabus", "")
+        score    = chunk.get("_score", chunk.get("similarity", 0))
 
-        chunk_text = f"[{source}]\n{chunk.get('content', '')}\n\n"
+        # Build source label
+        source = f"{subject} {year} {syllabus}".strip()
+
+        content = chunk.get("content", "").strip()
+
+        # Skip duplicate or near-duplicate content
+        content_key = content[:100]
+        if content_key in seen_content:
+            continue
+        seen_content.add(content_key)
+
+        chunk_text = f"[Source {i+1}: {source}]\n{content}\n\n"
 
         if total + len(chunk_text) > max_chars:
             break
 
         context += chunk_text
-        total   += len(chunk_text)
+        total += len(chunk_text)
 
     return context.strip()
 
+
+# ── Save Chunks ───────────────────────────────────────────────────────────────
 
 def save_chunks_with_embeddings(
     paper_id: str,
     chunks:   list[str]
 ) -> int:
     """
-    Save chunks with their vector embeddings.
+    Save chunks with their vector embeddings to Supabase.
     Called after PDF upload and text extraction.
+    Uses batching for Voyage API rate limit compliance.
     """
     if not chunks:
         return 0
 
     saved = 0
-    batch_size = 20  # Voyage API rate limit friendly
+    batch_size = 20
 
     for i in range(0, len(chunks), batch_size):
         batch = chunks[i:i + batch_size]
 
         try:
-            # Get embeddings for this batch
             result = voyage.embed(
                 texts=batch,
                 model="voyage-2",
@@ -151,7 +290,6 @@ def save_chunks_with_embeddings(
             )
             embeddings = result.embeddings
 
-            # Build records with embeddings
             records = [
                 {
                     "paper_id":    paper_id,

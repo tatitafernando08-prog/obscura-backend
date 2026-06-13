@@ -1,9 +1,10 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from services.rag_service import search_chunks_semantic, build_context
+from services.rag_service import search_chunks_hybrid, build_context
 from services.ai_service import ask_nesh
 from supabase import create_client
 import os
+import traceback
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -19,10 +20,11 @@ class ChatRequest(BaseModel):
     question:     str
     stream:       str
     subject:      str
-    syllabus:     str
+    syllabus:     str = ""
     medium:       str = "english"
     student_id:   str
     chat_history: list[dict] = []
+    year:         int = None  # Optional year filter
 
 class ChatResponse(BaseModel):
     answer:  str
@@ -34,15 +36,19 @@ async def ask_question(request: ChatRequest):
         if not request.question.strip():
             raise HTTPException(status_code=400, detail="Question cannot be empty")
 
-        chunks = search_chunks_semantic(
-            query=   request.question,
-            stream=  request.stream,
-            subject= request.subject,
-            limit=   5
+        # Use hybrid search (semantic + keyword + reranking)
+        chunks = search_chunks_hybrid(
+            query=    request.question,
+            stream=   request.stream,
+            subject=  request.subject,
+            syllabus= request.syllabus,
+            limit=    5
         )
 
-        context = build_context(chunks, max_chars=3000)
+        # Build rich context from top chunks
+        context = build_context(chunks, max_chars=4000)
 
+        # Generate answer with NESH
         answer = ask_nesh(
             question=     request.question,
             context=      context,
@@ -52,6 +58,7 @@ async def ask_question(request: ChatRequest):
             chat_history= request.chat_history
         )
 
+        # Save to chat history
         source_titles = []
         for chunk in chunks[:3]:
             paper = chunk.get("past_papers", {})
@@ -72,7 +79,6 @@ async def ask_question(request: ChatRequest):
     except HTTPException:
         raise
     except Exception as e:
-        import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Chat error: {str(e)}")
 
