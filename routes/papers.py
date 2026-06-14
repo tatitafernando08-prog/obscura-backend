@@ -1,6 +1,6 @@
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from supabase import create_client
-from services.pdf_service import extract_text_from_pdf, chunk_text, get_pdf_page_count
+from services.pdf_service import smart_extract_text, chunk_text, get_pdf_page_count
 from services.rag_service import save_chunks_with_embeddings
 import os
 from dotenv import load_dotenv
@@ -64,7 +64,7 @@ async def upload_paper(
 
         paper_id = paper_result.data[0]["id"]
 
-        text = extract_text_from_pdf(pdf_bytes)
+        text = smart_extract_text(pdf_bytes)
 
         if not text.strip():
             return {
