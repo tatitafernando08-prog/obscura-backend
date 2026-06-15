@@ -11,7 +11,7 @@ router = APIRouter()
 
 # Load Whisper model once (small = fast + accurate enough)
 print("Loading Whisper model...")
-whisper_model = whisper.load_model("small")
+whisper_model = whisper.load_model("tiny")
 print("Whisper model loaded!")
 
 
