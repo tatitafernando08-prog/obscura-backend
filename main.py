@@ -1,7 +1,9 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
+from routes import papers, chat, search, voice
 import os
+
 
 # Load .env file first thing
 load_dotenv()
@@ -31,6 +33,7 @@ app.add_middleware(
 app.include_router(papers.router, prefix="/papers", tags=["Past Papers"])
 app.include_router(chat.router,   prefix="/chat",   tags=["NESH AI Chat"])
 app.include_router(search.router, prefix="/search", tags=["RAG Search"])
+app.include_router(voice.router, prefix="/voice", tags=["Voice IoT"])
 
 # ── Health check ─────────────────────────────────────────────────────────────
 @app.get("/")
