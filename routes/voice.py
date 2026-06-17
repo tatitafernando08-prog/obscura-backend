@@ -132,11 +132,7 @@ async def voice_ask(
         print(f"Voice error: {e}")
         raise HTTPException(status_code=500, detail=f"Voice processing failed: {str(e)}")
     finally:
-        if tmp_response_path:
-            try:
-                os.unlink(tmp_response_path)
-            except:
-                pass
+        pass
 
 
 @router.get("/test")
