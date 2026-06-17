@@ -3,54 +3,39 @@ from fastapi.responses import FileResponse
 from gtts import gTTS
 import tempfile
 import os
-import subprocess
+import base64
+import google.generativeai as genai
 from services.rag_service import search_chunks_semantic, build_context
 from services.ai_service import ask_nesh
 
 router = APIRouter()
 
+genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 
-def transcribe_audio(audio_bytes: bytes) -> str:
-    """
-    Convert audio to text using OpenAI Whisper CLI.
-    Uses tiny model to minimize memory usage.
-    """
-    tmp_path = None
+
+def transcribe_with_gemini(audio_bytes: bytes) -> str:
+    """Use Gemini to transcribe audio directly."""
+    model = genai.GenerativeModel("gemini-2.5-flash")
+    
+    # Save to temp file
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
+        tmp.write(audio_bytes)
+        tmp_path = tmp.name
+
     try:
-        # Save audio to temp file
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
-            tmp.write(audio_bytes)
-            tmp_path = tmp.name
-
-        # Run whisper as subprocess to avoid memory issues
-        result = subprocess.run(
-            ["whisper", tmp_path, "--model", "tiny", "--output_format", "txt", "--output_dir", "/tmp"],
-            capture_output=True,
-            text=True,
-            timeout=60
-        )
-
-        if result.returncode != 0:
-            raise Exception(f"Whisper failed: {result.stderr}")
-
-        # Read the output txt file
-        txt_path = tmp_path.replace(".wav", ".txt")
-        txt_path = f"/tmp/{os.path.basename(tmp_path).replace('.wav', '.txt')}"
+        audio_file = genai.upload_file(tmp_path, mime_type="audio/wav")
         
-        if os.path.exists(txt_path):
-            with open(txt_path, "r") as f:
-                transcript = f.read().strip()
-            os.unlink(txt_path)
-            return transcript
-        else:
-            raise Exception("Whisper output file not found")
-
+        response = model.generate_content([
+            audio_file,
+            "Transcribe exactly what is said in this audio. Return only the transcription text, nothing else."
+        ])
+        
+        return response.text.strip()
     finally:
-        if tmp_path and os.path.exists(tmp_path):
-            try:
-                os.unlink(tmp_path)
-            except:
-                pass
+        try:
+            os.unlink(tmp_path)
+        except:
+            pass
 
 
 @router.post("/ask")
@@ -64,25 +49,24 @@ async def voice_ask(
     """
     Full voice pipeline:
     1. Receive audio from ESP32
-    2. Convert speech to text (Whisper CLI)
-    3. Search past papers (RAG)
-    4. Generate answer (Gemini)
-    5. Convert answer to speech (gTTS)
-    6. Return audio file to ESP32
+    2. Gemini transcribes audio to text
+    3. RAG search past papers
+    4. Gemini generates answer
+    5. gTTS converts to audio
+    6. Return MP3 to ESP32
     """
     tmp_response_path = None
 
     try:
         # ── Step 1: Read audio ──
         audio_bytes = await audio.read()
-
         if len(audio_bytes) == 0:
             raise HTTPException(status_code=400, detail="Empty audio file")
 
         print(f"Received audio: {len(audio_bytes)} bytes")
 
-        # ── Step 2: Speech to Text ──
-        question = transcribe_audio(audio_bytes)
+        # ── Step 2: Transcribe with Gemini ──
+        question = transcribe_with_gemini(audio_bytes)
         print(f"Transcribed: {question}")
 
         if not question:
@@ -97,7 +81,7 @@ async def voice_ask(
         )
         context = build_context(chunks, max_chars=3000)
 
-        # ── Step 4: Generate Answer (Gemini via NESH) ──
+        # ── Step 4: Generate Answer ──
         answer = ask_nesh(
             question=question,
             context=context,
@@ -118,13 +102,11 @@ async def voice_ask(
 
         tts = gTTS(text=answer, lang=tts_lang, slow=False)
 
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp_response:
-            tts.save(tmp_response.name)
-            tmp_response_path = tmp_response.name
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp_out:
+            tts.save(tmp_out.name)
+            tmp_response_path = tmp_out.name
 
-        print(f"TTS saved: {tmp_response_path}")
-
-        # ── Step 6: Return audio ──
+        # ── Step 6: Return MP3 ──
         return FileResponse(
             tmp_response_path,
             media_type="audio/mpeg",
@@ -152,10 +134,8 @@ async def voice_ask(
 def voice_test():
     return {
         "status": "Voice endpoint ready",
-        "stt": "OpenAI Whisper (tiny)",
-        "tts": "gTTS ready",
+        "stt": "Gemini 2.5 Flash (multimodal)",
+        "tts": "gTTS",
         "llm": "Gemini 2.5 Flash",
-        "endpoints": {
-            "voice_ask": "POST /voice/ask — send audio file, get audio response"
-        }
+        "endpoint": "POST /voice/ask"
     }
