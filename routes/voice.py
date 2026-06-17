@@ -121,8 +121,8 @@ async def voice_ask(
             media_type="audio/mpeg",
             filename="nesh_response.mp3",
             headers={
-                "X-Question": question,
-                "X-Answer-Preview": answer[:200]
+                "X-Question": question[:100].encode('ascii', 'ignore').decode(),
+                "X-Answer-Preview": answer[:100].replace('\n', ' ').encode('ascii', 'ignore').decode()
             }
         )
 
