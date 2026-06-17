@@ -4,38 +4,48 @@ from gtts import gTTS
 import tempfile
 import os
 import base64
-import google.generativeai as genai
+import requests
 from services.rag_service import search_chunks_semantic, build_context
 from services.ai_service import ask_nesh
 
 router = APIRouter()
 
-genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-
 
 def transcribe_with_gemini(audio_bytes: bytes) -> str:
-    """Use Gemini to transcribe audio directly."""
-    model = genai.GenerativeModel("gemini-2.5-flash")
+    """Use Gemini API directly to transcribe audio via base64."""
+    api_key = os.getenv("GEMINI_API_KEY")
     
-    # Save to temp file
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
-        tmp.write(audio_bytes)
-        tmp_path = tmp.name
-
-    try:
-        audio_file = genai.upload_file(tmp_path, mime_type="audio/wav")
-        
-        response = model.generate_content([
-            audio_file,
-            "Transcribe exactly what is said in this audio. Return only the transcription text, nothing else."
-        ])
-        
-        return response.text.strip()
-    finally:
-        try:
-            os.unlink(tmp_path)
-        except:
-            pass
+    # Encode audio to base64
+    audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")
+    
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
+    
+    payload = {
+        "contents": [
+            {
+                "parts": [
+                    {
+                        "inline_data": {
+                            "mime_type": "audio/wav",
+                            "data": audio_b64
+                        }
+                    },
+                    {
+                        "text": "Transcribe exactly what is said in this audio. Return only the transcription, nothing else."
+                    }
+                ]
+            }
+        ]
+    }
+    
+    response = requests.post(url, json=payload, timeout=30)
+    
+    if response.status_code != 200:
+        raise Exception(f"Gemini STT failed: {response.text}")
+    
+    result = response.json()
+    transcript = result["candidates"][0]["content"]["parts"][0]["text"].strip()
+    return transcript
 
 
 @router.post("/ask")
@@ -51,8 +61,8 @@ async def voice_ask(
     1. Receive audio from ESP32
     2. Gemini transcribes audio to text
     3. RAG search past papers
-    4. Gemini generates answer
-    5. gTTS converts to audio
+    4. Gemini generates answer via NESH
+    5. gTTS converts answer to audio
     6. Return MP3 to ESP32
     """
     tmp_response_path = None
@@ -65,7 +75,7 @@ async def voice_ask(
 
         print(f"Received audio: {len(audio_bytes)} bytes")
 
-        # ── Step 2: Transcribe with Gemini ──
+        # ── Step 2: Transcribe ──
         question = transcribe_with_gemini(audio_bytes)
         print(f"Transcribed: {question}")
 
@@ -99,7 +109,6 @@ async def voice_ask(
             "english": "en"
         }
         tts_lang = tts_lang_map.get(medium.lower(), "en")
-
         tts = gTTS(text=answer, lang=tts_lang, slow=False)
 
         with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp_out:
@@ -134,7 +143,7 @@ async def voice_ask(
 def voice_test():
     return {
         "status": "Voice endpoint ready",
-        "stt": "Gemini 2.5 Flash (multimodal)",
+        "stt": "Gemini 2.5 Flash (inline audio)",
         "tts": "gTTS",
         "llm": "Gemini 2.5 Flash",
         "endpoint": "POST /voice/ask"
