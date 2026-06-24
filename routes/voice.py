@@ -93,13 +93,13 @@ async def voice_ask(
 
         # ── Step 4: Generate Answer ──
         answer = ask_nesh(
-            question=question,
-            context=context,
-            stream=stream,
-            subject=subject,
-            medium=medium,
-            chat_history=[]
-        )
+           question=question,
+           context=context,
+           stream=stream,
+           subject=subject,
+           medium=medium,
+           chat_history=[]
+       )
         print(f"Answer: {answer[:100]}...")
 
         # ── Step 5: Text to Speech ──
