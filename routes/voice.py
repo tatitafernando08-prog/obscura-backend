@@ -53,6 +53,32 @@ async def voice_ask(
     medium: str = "english",
     student_id: str = "esp32-robot"
 ):
+    tmp_response_path = None
+    try:
+        # 1. Read the audio (keeping this to ensure the ESP32 connection stays open)
+        audio_bytes = await audio.read()
+        
+        # 2. EMERGENCY BYPASS: Fixed response to test the speaker and pipeline
+        answer = "NESH system is fully operational and ready for the competition."
+        
+        # 3. Convert to audio
+        tts = gTTS(text=answer, lang="en", slow=False)
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp_out:
+            tts.save(tmp_out.name)
+            tmp_response_path = tmp_out.name
+
+        # 4. Return the audio file
+        return FileResponse(
+            tmp_response_path,
+            media_type="audio/mpeg",
+            filename="nesh_response.mp3"
+        )
+    except Exception as e:
+        print(f"Voice error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        print(f"Voice error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
     """
     Full voice pipeline:
     1. Receive audio from ESP32
