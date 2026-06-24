@@ -53,107 +53,33 @@ async def voice_ask(
     medium: str = "english",
     student_id: str = "esp32-robot"
 ):
-    tmp_response_path = None
     try:
-        # 1. Read the audio (keeping this to ensure the ESP32 connection stays open)
+        # 1. Read input
         audio_bytes = await audio.read()
         
-        # 2. EMERGENCY BYPASS: Fixed response to test the speaker and pipeline
-        answer = "NESH system is fully operational and ready for the competition."
+        # 2. EMERGENCY BYPASS
+        answer = "Nesh is online."
         
-        # 3. Convert to audio
+        # 3. TTS setup
         tts = gTTS(text=answer, lang="en", slow=False)
+        
+        # 4. Save to temp file
         with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp_out:
             tts.save(tmp_out.name)
             tmp_response_path = tmp_out.name
-
-        # 4. Return the audio file
-        return FileResponse(
-            tmp_response_path,
-            media_type="audio/mpeg",
-            filename="nesh_response.mp3"
-        )
-    except Exception as e:
-        print(f"Voice error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-    except Exception as e:
-        print(f"Voice error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-    """
-    Full voice pipeline:
-    1. Receive audio from ESP32
-    2. Gemini transcribes audio to text
-    3. RAG search past papers
-    4. Gemini generates answer via NESH
-    5. gTTS converts answer to audio
-    6. Return MP3 to ESP32
-    """
-    tmp_response_path = None
-
-    try:
-        # ── Step 1: Read audio ──
-        audio_bytes = await audio.read()
-        if len(audio_bytes) == 0:
-            raise HTTPException(status_code=400, detail="Empty audio file")
-
-        print(f"Received audio: {len(audio_bytes)} bytes")
-
-        # ── Step 2: Transcribe ──
-        question = transcribe_with_gemini(audio_bytes)
-        print(f"Transcribed: {question}")
-
-        if not question:
-            raise HTTPException(status_code=400, detail="Could not transcribe audio")
-
-        # ── Step 3: RAG Search ──
-        chunks = search_chunks_semantic(
-            query=question,
-            stream=stream,
-            subject=subject,
-            limit=5
-        )
-        context = build_context(chunks, max_chars=3000)
-
-        # ── Step 4: Generate Answer ──
-        answer = ask_nesh(
-            question=question,
-            context=context,
-            stream=stream,
-            subject=subject,
-            medium=medium,
-            chat_history=[]
-        )
-        print(f"Answer: {answer[:100]}...")
-
-        # ── Step 5: Text to Speech ──
-        tts_lang_map = {
-            "sinhala": "si",
-            "tamil": "ta",
-            "english": "en"
-        }
-        tts_lang = tts_lang_map.get(medium.lower(), "en")
-        tts = gTTS(text=answer, lang=tts_lang, slow=False)
-
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp_out:
-            tts.save(tmp_out.name)
-            tmp_response_path = tmp_out.name
-
-        # ── Step 6: Return MP3 ──
+        
+        # 5. Return the file with headers
         return FileResponse(
             tmp_response_path,
             media_type="audio/mpeg",
             filename="nesh_response.mp3",
             headers={
-                "X-Question": question[:100].encode('ascii', 'ignore').decode(),
-                "X-Answer-Preview": answer[:100].replace('\n', ' ').encode('ascii', 'ignore').decode()
+                "X-Answer-Preview": "Nesh is online"
             }
         )
-
-    except HTTPException:
-        raise
     except Exception as e:
         print(f"Voice error: {e}")
-        raise HTTPException(status_code=500, detail=f"Voice processing failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
     finally:
         pass
 
