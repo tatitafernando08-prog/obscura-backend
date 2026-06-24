@@ -38,7 +38,7 @@ def transcribe_with_gemini(audio_bytes: bytes) -> str:
     ]
 }
     
-    response = requests.post(url, json=payload, timeout=30)
+    response = requests.post(url, json=payload, timeout=60)
     
     if response.status_code != 200:
         raise Exception(f"Gemini STT failed: {response.text}")
@@ -93,13 +93,13 @@ async def voice_ask(
 
         # ── Step 4: Generate Answer ──
         answer = ask_nesh(
-           question=question,
-           context=context,
-           stream=stream,
-           subject=subject,
-           medium=medium,
-           chat_history=[]
-       )
+            question=question,
+            context=context,
+            stream=stream,
+            subject=subject,
+            medium=medium,
+            chat_history=[]
+        )
         print(f"Answer: {answer[:100]}...")
 
         # ── Step 5: Text to Speech ──
