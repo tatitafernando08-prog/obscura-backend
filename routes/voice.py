@@ -21,22 +21,22 @@ def transcribe_with_gemini(audio_bytes: bytes) -> str:
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
     
     payload = {
-        "contents": [
-            {
-                "parts": [
-                    {
-                        "inline_data": {
-                            "mime_type": "audio/wav",
-                            "data": audio_b64
-                        }
-                    },
-                    {
-                        "text": "Transcribe exactly what is said in this audio. Return only the transcription, nothing else."
+    "contents": [
+        {
+            "parts": [
+                {
+                    "inline_data": {
+                        "mime_type": "audio/wav",
+                        "data": audio_b64
                     }
-                ]
-            }
-        ]
-    }
+                },
+                {
+                    "text": "Transcribe exactly what is said in this audio. Return only the transcription, nothing else."
+                }
+            ]
+        }
+    ]
+}
     
     response = requests.post(url, json=payload, timeout=30)
     
