@@ -55,27 +55,25 @@ async def voice_ask(
 ):
     try:
         # 1. Read input
-        audio_bytes = await audio.read()
+        await audio.read()
         
-        # 2. EMERGENCY BYPASS
-        answer = "Nesh is online."
+        # 2. EMERGENCY BYPASS: Extremely short text
+        # "Hi" draws less power than a full sentence.
+        answer = "Hi."
         
-        # 3. TTS setup
-        tts = gTTS(text=answer, lang="en", slow=False)
+        # 3. TTS setup (slow=True makes it speak slower, which spreads the power draw over time)
+        tts = gTTS(text=answer, lang="en", slow=True)
         
         # 4. Save to temp file
         with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp_out:
             tts.save(tmp_out.name)
             tmp_response_path = tmp_out.name
         
-        # 5. Return the file with headers
+        # 5. Return the file
         return FileResponse(
             tmp_response_path,
             media_type="audio/mpeg",
-            filename="nesh_response.mp3",
-            headers={
-                "X-Answer-Preview": "Nesh is online"
-            }
+            filename="nesh_response.mp3"
         )
     except Exception as e:
         print(f"Voice error: {e}")
