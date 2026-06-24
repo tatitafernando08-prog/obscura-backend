@@ -12,27 +12,22 @@ router = APIRouter()
 
 
 def transcribe_with_gemini(audio_bytes: bytes) -> str:
-    """Use Gemini API directly to transcribe audio via base64."""
     api_key = os.getenv("GEMINI_API_KEY")
-    
-    # Encode audio to base64
     audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
     
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
-    
-    # CRITICAL FIX: Shifted from snake_case to camelCase for raw REST API requirements
     payload = {
         "contents": [
             {
                 "parts": [
                     {
-                        "inlineData": {
+                        "inlineData": {  # MUST be camelCase
                             "mimeType": "audio/wav",
                             "data": audio_b64
                         }
                     },
                     {
-                        "text": "Transcribe exactly what is said in this audio. Return only the transcription, nothing else."
+                        "text": "Transcribe exactly what is said in this audio. Return only the transcription."
                     }
                 ]
             }
@@ -45,7 +40,8 @@ def transcribe_with_gemini(audio_bytes: bytes) -> str:
         raise Exception(f"Gemini STT failed: {response.text}")
     
     result = response.json()
-    transcript = result["candidates"][0]["content"]["parts"][0]["text"].strip()
+    # Safely navigate the response
+    return result["candidates"][0]["content"]["parts"][0]["text"].strip()
     return transcript
 
 
