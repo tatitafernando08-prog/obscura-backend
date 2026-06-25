@@ -1,3 +1,4 @@
+from pydub import AudioSegment
 from fastapi import APIRouter, UploadFile, File, HTTPException
 from fastapi.responses import FileResponse
 from gtts import gTTS
@@ -54,26 +55,38 @@ async def voice_ask(
     student_id: str = "esp32-robot"
 ):
     try:
-        # 1. Read input
+        # Read the incoming microphone payload to keep the connection intact
         await audio.read()
         
-        # 2. EMERGENCY BYPASS: Extremely short text
-        # "Hi" draws less power than a full sentence.
-        answer = "Hi."
+        # Keep the response extremely brief to minimize power spikes during the demo
+        answer = "Hi, I am ready."
         
-        # 3. TTS setup (slow=True makes it speak slower, which spreads the power draw over time)
-        tts = gTTS(text=answer, lang="en", slow=True)
+        # 1. Generate the base MP3 audio using Google TTS
+        tts = gTTS(text=answer, lang="en", slow=False)
         
-        # 4. Save to temp file
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp_out:
-            tts.save(tmp_out.name)
-            tmp_response_path = tmp_out.name
+        temp_mp3 = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
+        tts.save(temp_mp3.name)
+        temp_mp3.close()
         
-        # 5. Return the file
+        # 2. TRANSCODE THE MP3 TO UNCOMPRESSED WAV MATCHING HER ESP32 SETTINGS
+        # This breaks the audio file down into the raw PCM samples her code expects
+        sound = AudioSegment.from_mp3(temp_mp3.name)
+        
+        # Force the track to 16000Hz, Mono channel, and 16-bit sample width (2 bytes)
+        sound = sound.set_frame_rate(16000).set_channels(1).set_sample_width(2)
+        
+        # Write out to a temporary WAV file format path
+        temp_wav_path = temp_mp3.name.replace(".mp3", ".wav")
+        sound.export(temp_wav_path, format="wav")
+        
+        # Delete the intermediate compressed file
+        os.unlink(temp_mp3.name)
+        
+        # 3. Return the raw uncompressed WAV payload to her stream client
         return FileResponse(
-            tmp_response_path,
-            media_type="audio/mpeg",
-            filename="nesh_response.mp3"
+            temp_wav_path,
+            media_type="audio/wav",
+            filename="nesh_response.wav"
         )
     except Exception as e:
         print(f"Voice error: {e}")
