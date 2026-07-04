@@ -1,4 +1,4 @@
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Request
 from supabase import create_client
 from services.pdf_service import smart_extract_text, chunk_text, get_pdf_page_count
 from services.rag_service import save_chunks_with_embeddings
@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 router = APIRouter()
+MAX_PDF_BYTES = 20 * 1024 * 1024  # 20MB
 
 supabase = create_client(
     os.getenv("SUPABASE_URL"),
@@ -17,6 +18,7 @@ supabase = create_client(
 
 @router.post("/upload")
 async def upload_paper(
+    request: Request,
     file: UploadFile = File(...),
     title: str = Form(...),
     subject: str = Form(...),
@@ -29,10 +31,17 @@ async def upload_paper(
         raise HTTPException(status_code=400, detail="Only PDF files accepted")
 
     try:
+        content_length = request.headers.get("content-length")
+        if content_length is not None and int(content_length) > MAX_PDF_BYTES:
+            raise HTTPException(status_code=413, detail="File too large (max 20MB)")
+
         pdf_bytes = await file.read()
 
         if len(pdf_bytes) == 0:
             raise HTTPException(status_code=400, detail="File is empty")
+
+        if len(pdf_bytes) > MAX_PDF_BYTES:
+            raise HTTPException(status_code=413, detail="File too large (max 20MB)")
 
         safe_filename = file.filename.replace(" ", "_")
         file_path = f"{stream}/{subject}/{year}/{safe_filename}"

@@ -60,28 +60,13 @@ def search_chunks_semantic(
                 'query_embedding': query_embedding,
                 'filter_stream':   stream   if stream   else None,
                 'filter_subject':  subject  if subject  else None,
+                'filter_syllabus': syllabus if syllabus else None,
+                'filter_year':     year,
                 'match_count':     limit,
             }
         ).execute()
 
-        chunks = result.data if result.data else []
-
-        # Additional metadata filtering after retrieval
-        if syllabus:
-            chunks = [
-                c for c in chunks
-                if c.get("past_papers", {}) and
-                c["past_papers"].get("syllabus", "").lower() == syllabus.lower()
-            ]
-
-        if year:
-            chunks = [
-                c for c in chunks
-                if c.get("past_papers", {}) and
-                c["past_papers"].get("year") == year
-            ]
-
-        return chunks
+        return result.data if result.data else []
 
     except Exception as e:
         print(f"Semantic search error: {e}")
@@ -127,6 +112,7 @@ def search_chunks_hybrid(
     stream:   str,
     subject:  str = "",
     syllabus: str = "",
+    year:     int = None,
     limit:    int = 5
 ) -> list[dict]:
     """
@@ -136,7 +122,7 @@ def search_chunks_hybrid(
     """
     # Get results from both methods
     semantic_results = search_chunks_semantic(
-        query, stream, subject, syllabus, limit=8
+        query, stream, subject, syllabus, year, limit=8
     )
     keyword_results = search_chunks_keyword(
         query, stream, subject, limit=5

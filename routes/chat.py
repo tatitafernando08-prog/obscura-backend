@@ -42,6 +42,7 @@ async def ask_question(request: ChatRequest):
             stream=   request.stream,
             subject=  request.subject,
             syllabus= request.syllabus,
+            year=     request.year,
             limit=    5
         )
 

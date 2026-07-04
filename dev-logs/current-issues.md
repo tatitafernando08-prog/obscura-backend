@@ -131,3 +131,22 @@ Railway supports deploying directly from a `Dockerfile` if one is present, so th
 3. **Add `tesseract-ocr` to the deploy config** (#11) — silent production failure waiting to happen on scanned PDFs.
 4. **Dockerize** — improves reproducibility and unblocks easier multi-host / CI deployment.
 5. Everything else (dead `year` field, temp file leak, schema docs, tests, logging) — incremental cleanup.
+
+---
+
+## Follow-ups from Round 1 Code Fixes (2026-07-04)
+
+### 16. MP3 temp file leak on `transcode_audio()` failure in `routes/voice.py`
+`transcode_audio()` creates an intermediate MP3 file (`temp_mp3.name`) and only unlinks it after a successful transcode. If ffmpeg fails (e.g., corrupted input audio), the MP3 is never deleted — a slow leak in the container's temp directory.
+
+**Fix**: wrap the transcode call in try/finally to always clean up `temp_mp3` regardless of success or failure.
+
+### 17. `BackgroundTask` cleanup may not run on client disconnect in `routes/voice.py`
+The current pattern uses `BackgroundTask` to delete the WAV file after `FileResponse` sends it. However, if the client disconnects mid-stream before the response finishes, the background task may not run, leaving the temp WAV file behind. This is inherent to the async cleanup pattern and has low impact (temp-dir file, only in disconnect scenarios).
+
+**Fix**: none needed unless measured temp-dir leaks become a problem. Accept as an acknowledged trade-off of this cleanup approach.
+
+### 18. `Content-Length` header size check is an over-estimate for multipart uploads
+Both `routes/papers.py` and `routes/voice.py` check the `Content-Length` header as an early-reject size gate. For multipart form uploads, this header reflects the entire request body (all form fields + MIME boundaries), not just the file payload. A file slightly under the cap could be rejected if accompanied by several form fields, because the multipart overhead pushes the total request size over the limit. The post-read byte-length check (`len(pdf_bytes)` or `len(audio_bytes)`) is the authoritative one.
+
+**Fix**: add a one-line comment in both routes explaining that `Content-Length` is a multipart-inclusive estimate; the actual file size is checked after reading. Alternatively, accept as-is since the 20MB cap for PDFs and voice uploads is documented as a generous ceiling.
