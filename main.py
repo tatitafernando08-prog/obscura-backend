@@ -1,15 +1,13 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
-from routes import papers, chat, search, voice
 import os
-
 
 # Load .env file first thing
 load_dotenv()
 
 # Import route modules
-from routes import papers, chat, search
+from routes import papers, chat, search, voice
 
 # ── Create FastAPI app ────────────────────────────────────────────────────────
 app = FastAPI(
@@ -19,12 +17,14 @@ app = FastAPI(
 )
 
 # ── CORS Middleware ───────────────────────────────────────────────────────────
-# This allows your Flutter app (and browser) to talk to this API.
-# In production, replace "*" with your actual domain.
+# Wildcard origins since the frontend's final domain isn't locked in yet.
+# allow_credentials must stay False: browsers reject allow_origins=["*"]
+# combined with allow_credentials=True, and this API doesn't use
+# cookies/credentialed requests anyway.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
