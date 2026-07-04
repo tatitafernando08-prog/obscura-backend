@@ -30,11 +30,11 @@ async def upload_paper(
     if not file.filename.endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files accepted")
 
-    content_length = request.headers.get("content-length")
-    if content_length is not None and int(content_length) > MAX_PDF_BYTES:
-        raise HTTPException(status_code=413, detail="File too large (max 20MB)")
-
     try:
+        content_length = request.headers.get("content-length")
+        if content_length is not None and int(content_length) > MAX_PDF_BYTES:
+            raise HTTPException(status_code=413, detail="File too large (max 20MB)")
+
         pdf_bytes = await file.read()
 
         if len(pdf_bytes) == 0:
